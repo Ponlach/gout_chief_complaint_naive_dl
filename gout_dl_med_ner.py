@@ -33,13 +33,120 @@ from transformers import pipeline
 pipe = pipeline("token-classification", model="Clinical-AI-Apollo/Medical-NER", aggregation_strategy='simple')
 ner_results = pipe(documents)
 
-import json
+#import json
 X = []
+vocab_all = []
 for item in ner_results:
   x_i = ""
   for i in item:
-    x_i+=str(i['word'])+" "
+    vocab_all.append(str(i['word']).replace(" ", ""))
+    x_i+=str(i['word']).replace(" ", "")+" "
   X.append(x_i)
+
+len(vocab_all)
+
+# import pickle
+# with open('X_notes', 'wb') as fp:
+#     pickle.dump(X, fp)
+
+# with open('ner_notes', 'wb') as fp:
+#     pickle.dump(ner_results, fp)
+
+# import pickle
+# with open ('X_notes', 'rb') as fp:
+#     itemlist = pickle.load(fp)
+# X = itemlist
+# vocab_all = "".join(X).split()
+
+# encoding=utf-8
+# Project: learn-pytorch
+# Author: xingjunjie    github: @gavinxing
+# Create Time: 29/07/2017 11:58 AM on PyCharm
+# Basic template from http://pytorch.org/tutorials/beginner/nlp/word_embeddings_tutorial.html
+
+import torch
+import torch.nn as nn
+import torch.autograd as autograd
+import torch.optim as optim
+import torch.nn.functional as F
+
+#word2vec tutorial https://gist.github.com/GavinXing/9954ea846072e115bb07d9758892382c
+class CBOW(nn.Module):
+
+    def __init__(self, context_size=2, embedding_size=100, vocab_size=None):
+        super(CBOW, self).__init__()
+        self.embeddings = nn.Embedding(vocab_size, embedding_size)
+        self.linear1 = nn.Linear(embedding_size, vocab_size)
+
+    def forward(self, inputs):
+        lookup_embeds = self.embeddings(inputs)
+        embeds = lookup_embeds.sum(dim=0)
+        out = self.linear1(embeds)
+        out = F.log_softmax(out)
+        return out
+
+
+
+# create your model and train.  here are some functions to help you make
+# the data ready for use by your module
+
+
+def make_context_vector(context, word_to_ix):
+    idxs = [word_to_ix[w] for w in context]
+    tensor = torch.LongTensor(idxs)
+    return autograd.Variable(tensor)
+
+
+# print(make_context_vector(data[0][0], word_to_ix))  # example
+
+if __name__ == '__main__':
+    CONTEXT_SIZE = 2  # 2 words to the left, 2 to the right
+    EMBEDDING_SIZE = 50
+    raw_text = vocab_all
+
+    # By deriving a set from `raw_text`, we deduplicate the array
+    raw_text = vocab_all
+    vocab = set(raw_text)
+    vocab_size = len(vocab)
+
+    word_to_ix = {word: i for i, word in enumerate(vocab)}
+    data = []
+    for i in range(2, len(raw_text) - 2):
+        context = [raw_text[i - 2], raw_text[i - 1],
+                   raw_text[i + 1], raw_text[i + 2]]
+        target = raw_text[i]
+        data.append((context, target))
+
+    loss_func = nn.CrossEntropyLoss()
+    net = CBOW(CONTEXT_SIZE, embedding_size=EMBEDDING_SIZE, vocab_size=vocab_size)
+    optimizer = optim.SGD(net.parameters(), lr=0.01)
+
+    for epoch in range(10):
+        total_loss = 0
+        for context, target in data:
+            context_var = make_context_vector(context, word_to_ix)
+            net.zero_grad()
+            log_probs = net(context_var)
+
+            loss = loss_func(log_probs.view(1,-1), autograd.Variable(
+                torch.LongTensor([word_to_ix[target]])
+            ))
+
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.data
+        print(total_loss)
+
+X_diced = []
+for i in X:
+  X_diced.append(i.split())
+
+len(X_diced)
+
+X_vec = []
+for i in X_diced:
+  X_vec.append(make_context_vector(i,word_to_ix))
 
 Y2 = [0 if x == 'N' else 1 if x == 'Y' else 2 for x in categories]
 Y = [1 if x == 'Y' else 0 for x in categories]
@@ -48,35 +155,98 @@ from collections import Counter
 Counter(Y)
 
 import random
-index_y = (random.sample(np.where(np.array(Y)==1)[0].tolist(), k = 100))
 
-index_x = range(1,8437)
-index_x = [e for e in index_x if e not in index_y]
-index_x = (random.sample(index_x, k = 100))
+index_pos = (random.sample(np.where(np.array(Y)==1)[0].tolist(), k = 60))
 
-x_train = [X[i] for i in index_y]+[X[i] for i in index_x]
-y_train = [Y[i] for i in index_y]+[Y[i] for i in index_x]
+index_neg = range(1,8437)
+index_neg = [e for e in index_neg if e not in index_pos]
+index_neg = (random.sample(index_neg, k = 600))
+
+x_train = [X_vec[i] for i in index_pos]+[X_vec[i] for i in index_neg]
+y_train = [Y[i] for i in index_pos]+[Y[i] for i in index_neg]
+
+x_train_list = []
+for i in x_train:
+  x_train_list.append(i.tolist())
+
+x_test_list = []
+for i in X_vec:
+  x_test_list.append(i.tolist())
+
+k = 1
+for i in x_test_list:
+  m = len(i)
+  if m>k:
+    k = m
+    print(k)
+
+max_len = 40
+
+pad_token=0
+x_train_padded = [k + [pad_token]*(max_len - len(k)) for k in x_train_list]
+x_test_padded = [k + [pad_token]*(max_len - len(k)) for k in x_test_list]
 
 from tensorflow.keras import layers, models, metrics
 import torch.nn.functional as F
+import tensorflow as tf
+
+# model = models.Sequential()
+# model.add(layers.Embedding(100000, 128, input_length=84))
+# model.add(layers.Conv1D(64, 3, activation='relu'))
+# model.add(layers.MaxPooling1D())
+# model.add(layers.Flatten())
+# model.add(layers.Dense(64, activation='relu'))
+# model.add(layers.Dense(2, activation='softmax'))
+
+# model.compile(optimizer='adam',
+#               loss=tf.keras.losses.BinaryCrossentropy(),
+#               metrics=[metrics.BinaryAccuracy()])
+
+# history = model.fit(x_train, y_train, epochs=10)
+
+batch_size = 20
+embedding_dims = 1
+filters = 250
+kernel_size = 3
+hidden_dims = 250
+epochs = 100
+vocab_size = 220
+
+# ##hyper parameters
+# batch_size = 32
+# embedding_dims = 300 #Length of the token vectors
+# filters = 250 #number of filters in your Convnet
+# kernel_size = 3 # a window size of 3 tokens
+# hidden_dims = 250 #number of neurons at the normal feedforward NN
+# epochs = 2
+
+from tensorflow.keras import layers, models, metrics
 
 model = models.Sequential()
-model.add(layers.Embedding(300000, 128, input_length=84))
-model.add(layers.Conv1D(64, 3, activation='relu'))
-model.add(layers.MaxPooling1D())
-model.add(layers.Flatten())
-model.add(layers.Dense(64, activation='relu'))
-model.add(layers.Dense(2))
 
-model.compile(optimizer='adam',
-              loss=tf.keras.losses.BinaryCrossentropy(),
-              metrics=[metrics.BinaryAccuracy()])
+#model.add(layers.Embedding(vocab_size, embedding_dims))
+model.add(layers.Conv1D(filters,kernel_size,padding = 'valid' , activation = 'relu',strides = 1 , input_shape = (max_len,embedding_dims)))
+model.add(layers.GlobalMaxPooling1D())
+model.add(layers.Dense(hidden_dims))
+model.add(layers.Dropout(0.2))
+model.add(layers.Activation('relu'))
+model.add(layers.Dense(1))
+model.add(layers.Activation('sigmoid'))
 
-history = model.fit(x_train, y_train, epochs=10)
+model.summary()
 
-pred = model.predict(X)
+model.compile(loss = 'binary_crossentropy',optimizer = 'adam', metrics = ['BinaryAccuracy'])
+history = model.fit(x_train_padded,y_train,batch_size = batch_size,epochs = epochs)
 
-Y_pred_classes = np.argmax(pred,axis = 1)
+pred = model.predict(x_test_padded)
+
+Y_pred_classes = np.round(pred).astype(int)
+
+Y_pred_classes = Y_pred_classes.tolist()
+
+Y_pred = []
+for i in Y_pred_classes:
+  Y_pred.append(i[0])
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -91,17 +261,15 @@ def showConfusionMatrix(y_true,y_pred):
     ax = sns.heatmap(confusion_matrix, annot=True,fmt="d",ax=ax)
     plt.show()
 
-showConfusionMatrix(Y,Y_pred_classes)
-p_micro, r_micro, f1_micro, _ = prfs(y_pred=Y_pred_classes, y_true=Y, average="micro")
+showConfusionMatrix(Y2,Y_pred)
+p_micro, r_micro, f1_micro, _ = prfs(y_pred=Y_pred, y_true=Y, average="micro")
 print("Micro Evaluation: Precision: %.4f; Recall: %.4f; F1-Score: %.4f" % (p_micro, r_micro, f1_micro))
-p_macro, r_macro, f1_macro, _ = prfs(y_pred=Y_pred_classes, y_true=Y, average="macro")
+p_macro, r_macro, f1_macro, _ = prfs(y_pred=Y_pred, y_true=Y, average="macro")
 print("Macro Evaluation: Precision: %.4f; Recall: %.4f; F1-Score: %.4f" % (p_macro, r_macro, f1_macro))
 
 k = 1
-for i in list(tokenized_inputs['input_ids']):
-  m = max(i)
-  if m > k:
+for i in X:
+  m = len(i)
+  if m>k:
     k = m
-    print(k)
-
-model.summary()
+    print(m)
